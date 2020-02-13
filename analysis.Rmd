@@ -1,0 +1,155 @@
+---
+title: "Are high rates of self-citation in Dermot Barnes-Holmes's recent research cause for concern for research on Relational Frame Theory?"
+author: "Ian Hussey"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+    code_folding: hide
+    highlight: haddock
+    theme: flatly
+    toc: yes 
+    toc_float: yes
+---
+
+# Introduction
+
+In 2018, Robert Sternberg [resigned](https://www.insidehighered.com/news/2018/04/30/prominent-psychologist-resigns-journal-editor-over-allegations-over-self-citation) from his position as editor of Perspectives in Psychological Science after questions were raised over the high rate of self-citation within his papers published in that journal. As Eiko Fried discussed in a [blogpost](https://eiko-fried.com/sternberg-selfcitations/), acccording to the COPE guidelines, editors publishing in their journals represents a strong risk of conflict of interest, which Sternberg seems to have not taken seriously enough. 
+
+Of course, an editor publishing in their own journal is only specific issue associated with self-citation. In general, high rates of self-citation can be signal of a range of undesirable things, siuch as over self-promotion or metric hacking. Of course, it can also signal other entirely non-malicious issues that are nonetheless problematic for a field. A very narrow or new area of work can consist of just a few authors and therefore result in a higher rate of self-citation. While this involves no malice, this might still represent a signal to the broader field that the area of work is of limited interest to people outside of it, that there is limited scope for new individuals to enter the area, or other inferences regarding the health of the area of research. 
+
+# Methods
+
+While reading a recent article co-authored by my former PhD supervisor, Dermot Barnes-Holmes (Barnes-Holmes, Barnes-Holmes, & McEnteggart, 2020), I noticed that the references section seemed exceptionally full of self-citations - roughly 50% from eyeballing it. While the field of work that Dermot publishes in - Relational Frame Theory/Contextual Behavioral Science - is known to be small, this seemed surprisingly high to me. The question of whether it was a one-off thing or not itched at me, along with the potential implicatons for the research area, so I decided to find out.
+
+In order to estimate the self-citation rate, I extracted the references sections of DBH's recent papers - those published from the start of 2019 until now (13/2/2020) as listed on Google Scholar. One entry was published in conference proceedings and contained no references and was therefore excluded (Hendricks et al., 2019). 
+
+# Results
+
+## Descriptives
+
+```{r include=FALSE}
+knitr::opts_chunk$set(message=FALSE,
+                      warning=FALSE)
+```
+
+```{r}
+
+# dependencies
+library(tidyverse)
+library(timesavers)
+library(metafor)
+library(plotrix)
+library(knitr)
+library(kableExtra)
+
+# get data
+data_raw <- read.csv("data.csv") %>%
+  mutate(cited_author_contains_bh = str_detect(cited_authors, "Barnes"))
+
+# summarize for later meta analyses
+data_summary_by_paper <- data_raw %>%
+  group_by(source_year, source_authors_abbreviated) %>%
+  dplyr::summarize(self_citation_rate = mean(cited_author_contains_bh),
+                   self_citation_se = plotrix::std.error(cited_author_contains_bh),
+                   n_citations = n()) %>%
+  ungroup() %>%
+  arrange(source_year, source_authors_abbreviated)
+
+# summarize overall
+data_summary_overall <- data_raw %>%
+  dplyr::summarize(citations = n(),
+                   self_citations = sum(cited_author_contains_bh),
+                   percent = mean(cited_author_contains_bh)) %>%
+  round_df(2) 
+
+# exclude outlier and summarize overall
+data_summary_overall_2 <- data_raw %>%
+  filter(source_authors_abbreviated != "Kavanagh et al. (2019a)") %>%
+  dplyr::summarize(citations = n(),
+                   self_citations = sum(cited_author_contains_bh),
+                   percent = mean(cited_author_contains_bh)) %>%
+  round_df(2) 
+
+```
+
+Of `r data_summary_overall$citations` citations in `r nrow(distinct(data_raw, source_authors_abbreviated))` recent articles, `r data_summary_overall$self_citations` of them were self-citations  - `r data_summary_overall$percent*100`%.
+
+One article, a literature review (Kavanagh et al., 2019a), seemed to be an outlier in its total number of citations and relatively low self citation rate. This status as an outlier was quantified further below in the meta analyses. The total self citation rate was therefore recalcuated without this article. Within the remaining articles, `r data_summary_overall_2$self_citations` of `r data_summary_overall_2$citations` citations were self-citations  - `r data_summary_overall_2$percent*100`%.
+
+## Meta analysis 
+
+Meta analysis was then used to estimate the self citation rate beyond this sample of articles given that the full population of articles was not obtained for practice reasons - this was an afternoon project after all. Sampling from recent publications was used over random sampling given that the rate of self-citation necessarilly changes over time (given fewer self publications to cite earlier in ones career). Random effects models were used given that the composition of the articles varies (e.g., theoretical pieces, empirical pieces, etc.). This also allowed me to quantify a) metrics of heterogeneity between articles and b) outliers among the sample.
+
+The table below includes multiple metrics by which to assess the presence of outliers, along with the "inf" column that represents a synthesis of several of the metrics. An asterisk/dot indicates that an article is likely an outlier that has undue influence on the estimate of the self-citation rate.
+
+```{r}
+
+# meta
+fit <- rma(yi      = self_citation_rate, 
+           sei     = self_citation_se,
+           ni      = n_citations,
+           weights = n_citations,
+           data    = data_summary_by_paper,
+           slab    = source_authors_abbreviated)
+
+influence_df <- influence(fit) 
+
+influence_df$inf %>%
+  as.data.frame() %>%
+  round_df(2) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+forest(fit, 
+       addcred = TRUE,
+       xlab    = "Self-citation rate",
+       xlim    = c(-1, 1.6),
+       at = c(0, .2, .4, .6, .8, 1),
+       refline = NULL)
+
+#summary(fit)
+
+```
+
+A high degree of heterogeneity was observed in the self-citation rate between articles (I^2^ = `r round(fit$I2, 1)`%, H^2^ = `r round(fit$H2, 1)`). This could be due to unmodelled factors such as whether the articles are experiments, reviews, or conceptual papers, whether they are primary works or collaborations, etc. 
+
+## Meta analysis after excluding outlier
+
+Tests of undue influence highlighted Kavanagh et al. (2019a) as a likly outlier for having a much lower rate of self-citation than the other papers. This was excluded and a new meta model refit.
+
+```{r}
+
+fit_2 <- data_summary_by_paper %>%
+  filter(source_authors_abbreviated != "Kavanagh et al. (2019a)") %>%
+  rma(yi      = self_citation_rate, 
+      sei     = self_citation_se,
+      ni      = n_citations,
+      weights = n_citations,
+      data    = .,
+      slab    = source_authors_abbreviated)
+
+forest(fit_2, 
+       addcred = TRUE,
+       xlab    = "Self-citation rate",
+       xlim    = c(-1, 1.6),
+       at = c(0, .2, .4, .6, .8, 1),
+       refline = NULL)
+
+#summary(fit_2)
+
+```
+
+After excluding the outlier, a moderate degree of heterogeneity was then observed in the self-citation rate between articles (I^2^ = `r round(fit_2$I2, 1)`%, H^2^ = `r round(fit_2$H2, 1)`). 
+
+# Discusson
+
+DBH's self-citation rate, as assessed from his recent papers, is quite high. Depending on whether or not you choose to exclude Kavanagh et al. (2019a) as an outlier, the self-citation rate was `r data_summary_overall$percent*100` or `r data_summary_overall_2$percent*100`%. 
+
+The results of the meta analyses and outlier tests are important to note: they suggest that the overall rate of self-citation is not driven by a small proportion of articles that have a large number of self-cites. Only one study was flagged as an outlier, and it was an outlier for having fewer self-citations than is typical, not more. Heterogeity metrics also suggest that the self-citation rate is relatively consistent. 
+
+These analyses don't delve into the nature of these self-citations. On the one hand, the field of RFT/CBS is a relatively small one and, as a co-author of the literal book on RFT, Dermot is at the center of this field. It may therefore be unsurprising that, as a leader in the field, he has much of his own work to cite. On the other hand, this rate of self-citation is worrying high in my opinion. I'm not implying or seeking to find mallace here. Indeed, the idea of a researcher overindulging in self-promotion within their own work would not be unheard of. As in Sternberg's case, the research community will have to make its own evaluation about the appropriateness of this rate of self-citation. 
+
+However, what worries me more is the idea that these citations *are* appropriate, meaning that the field really is this small and uninteresting to the wider field outside of a tiny handful of reseachers. This is particularly concerning in light of Dermot having announced that he will be going into semi-retirement at the end of this academic year and returning to Ireland. If this self-citation rate is a result of the field's size, will Dermot's retirement signal RFT's last gasps as an active area of research? 
+
+
+
